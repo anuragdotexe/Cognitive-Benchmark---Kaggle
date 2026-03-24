@@ -1,24 +1,49 @@
-# Updated snippet for src/run_task.py
-MODELS_TO_TEST = [
-    'google/gemini-3.1-pro-preview', # The reasoning leader
-    'google/gemini-3-flash-preview',  # The fast collaborator
-    'deepseek-ai/deepseek-r1-0528',   # The specialized thinker
-    'google/gemma-3-4b'               # The small baseline
-]
+import json
+import kaggle_benchmarks as kbench
+from src.evaluator import evaluate_response
+from src.task_config import get_prompt
 
-def run_benchmark():
-    task = ExecutiveFunctionTask()
-    summary_report = {}
+class ExecutiveFunctionTask(kbench.BenchmarkTask):
+    """
+    Kaggle-compliant task for testing Executive Function (Pivot Logic).
+    """
+    def __init__(self, data_path="data/circuits_v1.json"):
+        # Metadata is required by the SDK for the dashboard
+        self.metadata = {
+            "name": "Circuit Pivot Challenge",
+            "track": "Executive Functions",
+            "description": "Tests if a model can re-plan logic when a gate is faulted.",
+            "version": "1.0.0"
+        }
+        with open(data_path, "r") as f:
+            self.dataset = json.load(f)
 
-    for model_id in MODELS_TO_TEST:
-        print(f"Testing Model: {model_id}...")
-        # Use the Kaggle SDK to initialize the specific model
-        model = kbench.llms.get(model_id) 
-        results = task.run(model)
+    def run(self, model_id: str):
+        """
+        Executes the benchmark against a specific model ID.
+        """
+        model = kbench.llms.get(model_id)
+        results = []
         
-        # Calculate average score for this model
-        avg_score = sum(r['score'] for r in results) / len(results)
-        summary_report[model_id] = avg_score
-        print(f"Result for {model_id}: {avg_score * 100}%")
+        for task in self.dataset:
+            prompt = get_prompt(task)
+            
+            # The SDK uses .generate or .query depending on the version
+            response = model.generate(prompt) 
+            
+            score = evaluate_response(response, task['ground_truth'])
+            
+            results.append({
+                "task_id": task['id'],
+                "score": score,
+                "model_response": response
+            })
+            
+        return results
 
-    return summary_report
+# Local Test Execution
+if __name__ == "__main__":
+    # Test with a lightweight model first to save quota
+    tester = ExecutiveFunctionTask()
+    summary = tester.run('google/gemini-3.1-flash-lite-preview')
+    print(f"Test Run Completed. Tasks Scored: {len(summary)}")
